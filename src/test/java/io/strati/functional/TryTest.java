@@ -61,6 +61,21 @@ public class TryTest {
   }
 
   @Test
+  public void testIsFailure() {
+    Try<Object> failure1 = Try.failure(new NullPointerException());
+    assertTrue(failure1.isFailure(NullPointerException.class));
+    assertTrue(failure1.isFailure(Exception.class));
+    assertFalse(failure1.isFailure(IllegalArgumentException.class));
+
+    Try<Object> failure2 = Try.ofFailable(() -> {
+      throw new Exception();
+    });
+    assertTrue(failure2.isFailure(Exception.class));
+    assertFalse(failure2.isFailure(NullPointerException.class));
+    assertFalse(failure2.isFailure(RuntimeException.class));
+  }
+
+  @Test
   public void testIfSuccess() {
     success("foo").ifSuccess(s -> assertEquals("foo", s));
     failure(new Throwable()).ifSuccess(s -> {

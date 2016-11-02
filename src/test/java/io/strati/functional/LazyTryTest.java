@@ -19,6 +19,7 @@ package io.strati.functional;
 import io.strati.functional.function.TryFunction;
 import org.junit.Test;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.strati.functional.Try.failure;
@@ -172,6 +173,72 @@ public class LazyTryTest {
     assertTrue(LazyTry.ofFailable(() -> 13).flatMap(() -> {
       throw new Exception();
     }).run().isFailure());
+  }
+
+  @Test
+  public void testAndThen_withFunction() throws Exception {
+    AtomicInteger ai = new AtomicInteger(1);
+    LazyTry<Integer> lazyTry1 = LazyTry.ofFailable(() -> 13).andThen(i -> {
+      ai.set(2600);
+      return LazyTry.success(1337);
+    });
+    assertTrue(1 == ai.get());
+    Try<Integer> res = lazyTry1.run();
+    assertTrue(2600 == ai.get());
+    assertTrue(1337 == res.get());
+
+    assertEquals("foobar", LazyTry.ofFailable(() -> "foo").andThen(foo -> LazyTry.success(foo + "bar")).run().get());
+
+    assertTrue(LazyTry.ofFailable(() -> 13).andThen(foo -> LazyTry.failure(new Exception())).run().isFailure());
+
+    assertTrue(LazyTry.ofFailable(() -> 13).andThen(foo -> {
+      throw new Exception();
+    }).run().isFailure());
+
+    // Monad left identity law
+    TryFunction<String, LazyTry<String>> f = s -> LazyTry.success(s + "bar");
+    LazyTry<String> lazyTryFoo = LazyTry.ofFailable(() -> "foo");
+    assertEquals(
+        f.apply("foo").run().get(),
+        lazyTryFoo.andThen(f).run().get()
+    );
+
+    // Monad right identity law
+    assertEquals(
+        lazyTryFoo.andThen(LazyTry::success).run().get(),
+        lazyTryFoo.run().get()
+    );
+
+    // Monad associativity law
+    assertEquals(
+        lazyTryFoo
+            .andThen(foo -> LazyTry.success(foo + "bar"))
+            .andThen(foobar -> LazyTry.success(foobar + "baz")).run().get(),
+        lazyTryFoo
+            .andThen(foo -> LazyTry.success(foo + "bar")
+                .andThen(foobar -> LazyTry.success(foobar + "baz"))).run().get()
+    );
+  }
+
+  @Test
+  public void testAndThen_withSupplier() throws Exception {
+    AtomicInteger ai = new AtomicInteger(1);
+    LazyTry<Integer> lazyTry1 = LazyTry.ofFailable(() -> 13).andThen(() -> {
+      ai.set(2600);
+      return success(1337);
+    });
+    assertTrue(1 == ai.get());
+    Try<Integer> res = lazyTry1.run();
+    assertTrue(2600 == ai.get());
+    assertTrue(1337 == res.get());
+
+    assertEquals("bar", LazyTry.ofFailable(() -> "foo").andThen(() -> success("bar")).run().get());
+
+    assertTrue(LazyTry.ofFailable(() -> 13).andThen(() -> failure(new Exception())).run().isFailure());
+
+    assertTrue(LazyTry.ofFailable(() -> 13).andThen(LazyTry.ofFailable(() -> {
+      throw new Exception();
+    })).run().isFailure());
   }
 
   @Test
@@ -354,6 +421,17 @@ public class LazyTryTest {
     });
 
     assertTrue(boom.run().isFailure());
+  }
+
+  @Test
+  public void testAsync() throws Exception {
+    LazyTry<String> lazyString = () -> Try.success("foo");
+    assertEquals("foo", lazyString.async().get(1, TimeUnit.SECONDS));
+
+    LazyTry<String> lazyException = () -> Try.ofFailable(() -> {
+      throw new RuntimeException("boom");
+    });
+    assertEquals("bar", lazyException.async().exceptionally(e -> "bar").get());
   }
 
 }

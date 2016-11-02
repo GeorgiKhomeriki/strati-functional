@@ -129,12 +129,7 @@ public abstract class Try<T> {
    * will be a {@code Failure} as well.
    */
   public static <T> Collector<Try<T>, AtomicReference<Try<Stream.Builder<T>>>, Try<List<T>>> listCollector() {
-    return new TryCollector<T, List<T>>() {
-      @Override
-      public Supplier<Collector<T, ?, List<T>>> collector() {
-        return Collectors::toList;
-      }
-    };
+    return (TryCollector<T, List<T>>) () -> Collectors::toList;
   }
 
   /**
@@ -145,18 +140,20 @@ public abstract class Try<T> {
    * will be a {@code Failure} as well.
    */
   public static <T> Collector<Try<T>, AtomicReference<Try<Stream.Builder<T>>>, Try<Set<T>>> setCollector() {
-    return new TryCollector<T, Set<T>>() {
-      @Override
-      public Supplier<Collector<T, ?, Set<T>>> collector() {
-        return Collectors::toSet;
-      }
-    };
+    return (TryCollector<T, Set<T>>) () -> Collectors::toSet;
   }
 
   /**
    * @return {@code true} if the {@code Try} is a {@code Failure}, {@code false} otherwise.
    */
   public abstract boolean isFailure();
+
+  /**
+   * @param e   the class representation of the Exception for which we want to test
+   * @param <E> the generic type of the Exception
+   * @return {@code true} if the {@code Try} is a {@code Failure}, {@code false} otherwise.
+   */
+  public abstract <E extends Exception> boolean isFailure(final Class<E> e);
 
   /**
    * @return {@code true} if the {@code Try} is a {@code Success}, {@code false} otherwise.
@@ -379,6 +376,11 @@ final class Success<T> extends Try<T> {
   }
 
   @Override
+  public <E extends Exception> boolean isFailure(final Class<E> e) {
+    return false;
+  }
+
+  @Override
   public boolean isSuccess() {
     return true;
   }
@@ -541,6 +543,11 @@ final class Failure<T> extends Try<T> {
   }
 
   @Override
+  public <E extends Exception> boolean isFailure(final Class<E> e) {
+    return e.isInstance(error);
+  }
+
+  @Override
   public boolean isSuccess() {
     return false;
   }
@@ -677,14 +684,21 @@ final class Failure<T> extends Try<T> {
 
 }
 
-abstract class TryCollector<T, U> implements Collector<Try<T>, AtomicReference<Try<Stream.Builder<T>>>, Try<U>> {
+@FunctionalInterface
+interface TryCollector<T, U> extends Collector<Try<T>, AtomicReference<Try<Stream.Builder<T>>>, Try<U>> {
+
+  /**
+   * @return A function that supplies the {@code Collector} to be used in the {@code finisher}.
+   */
+  Supplier<Collector<T, ?, U>> collector();
+
   /**
    * @return A function that, when called, returns a reference to a {@code Success<StreamBuilder>}.
    * The {@code StreamBuilder} will be used to build up the {@code Stream<T>}. The {@code AtomicReference} is needed
    * because the {@code Try} needs to be mutated in certain cases while collecting the {@code Stream} (see {@code accumulator}).
    */
   @Override
-  public Supplier<AtomicReference<Try<Stream.Builder<T>>>> supplier() {
+  default Supplier<AtomicReference<Try<Stream.Builder<T>>>> supplier() {
     return () -> new AtomicReference<>(Try.success(Stream.builder()));
   }
 
@@ -694,7 +708,7 @@ abstract class TryCollector<T, U> implements Collector<Try<T>, AtomicReference<T
    * reference to the {@code StreamBuilder} to a {@code Failure}.
    */
   @Override
-  public BiConsumer<AtomicReference<Try<Stream.Builder<T>>>, Try<T>> accumulator() {
+  default BiConsumer<AtomicReference<Try<Stream.Builder<T>>>, Try<T>> accumulator() {
     return (builder, next) -> builder.get().ifSuccess(b ->
         next.ifSuccess(b::accept)
             .ifFailure(e -> builder.set(Try.failure(e)))
@@ -707,11 +721,11 @@ abstract class TryCollector<T, U> implements Collector<Try<T>, AtomicReference<T
    * to "left" and return the reference to "left".
    */
   @Override
-  public BinaryOperator<AtomicReference<Try<Stream.Builder<T>>>> combiner() {
+  default BinaryOperator<AtomicReference<Try<Stream.Builder<T>>>> combiner() {
     return (leftRef, rightRef) -> {
       final Try<Stream.Builder<T>> left = leftRef.get();
       final Try<Stream.Builder<T>> right = rightRef.get();
-      leftRef.set(right.flatMap(rb -> left.ifSuccess(lb -> rb.build().forEach(lb::accept))));
+      leftRef.set(right.flatMap(rb -> left.ifSuccess(lb -> rb.build().forEach(lb))));
       return leftRef;
     };
   }
@@ -722,17 +736,13 @@ abstract class TryCollector<T, U> implements Collector<Try<T>, AtomicReference<T
    * supplied by the abstract method {@code collector()}.
    */
   @Override
-  public Function<AtomicReference<Try<Stream.Builder<T>>>, Try<U>> finisher() {
+  default Function<AtomicReference<Try<Stream.Builder<T>>>, Try<U>> finisher() {
     return builder -> builder.get().map(b -> b.build().collect(collector().get()));
   }
 
   @Override
-  public Set<Characteristics> characteristics() {
+  default Set<Characteristics> characteristics() {
     return Collections.emptySet();
   }
 
-  /**
-   * @return A function that supplies the {@code Collector} to be used in the {@code finisher}.
-   */
-  public abstract Supplier<Collector<T, ?, U>> collector();
 }

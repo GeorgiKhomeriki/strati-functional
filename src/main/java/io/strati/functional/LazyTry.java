@@ -18,6 +18,7 @@ package io.strati.functional;
 
 import io.strati.functional.function.*;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 /**
@@ -83,6 +84,14 @@ public interface LazyTry<T> {
     return () -> run().ifFailure(e, c);
   }
 
+  default <U> LazyTry<U> andThen(final LazyTry<? extends U> l) {
+    return this.flatMap(l::run);
+  }
+
+  default <U> LazyTry<U> andThen(final TryFunction<? super T, ? extends LazyTry<? extends U>> f) {
+    return this.flatMap(t -> f.apply(t).run());
+  }
+
   default <U> LazyTry<U> flatMap(final TryFunction<? super T, ? extends Try<? extends U>> f) {
     return () -> run().flatMap(f);
   }
@@ -133,6 +142,10 @@ public interface LazyTry<T> {
 
   default <U> U apply(final Function<LazyTry<T>, ? extends U> f) {
     return f.apply(this);
+  }
+
+  default CompletableFuture<T> async() {
+    return CompletableFuture.supplyAsync(run()::get);
   }
 
 }
